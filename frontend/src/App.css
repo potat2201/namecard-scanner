@@ -1,0 +1,239 @@
+.app {
+  max-width: 1280px;
+  margin: 0 auto;
+  padding: 2rem 1.5rem 4rem;
+}
+
+.header h1 {
+  margin: 0 0 0.35rem;
+  font-size: 1.75rem;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+}
+
+.subtitle {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.95rem;
+}
+
+.upload-zone {
+  margin: 2rem 0 1.5rem;
+  padding: 2.5rem 1.5rem;
+  border: 2px dashed var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+  text-align: center;
+  cursor: pointer;
+  transition: border-color 0.2s, background 0.2s;
+}
+
+.upload-zone:hover,
+.upload-zone:focus-visible {
+  border-color: var(--accent);
+  background: var(--surface-hover);
+  outline: none;
+}
+
+.upload-zone--busy {
+  opacity: 0.7;
+  pointer-events: none;
+}
+
+.upload-icon {
+  font-size: 2.5rem;
+  margin-bottom: 0.5rem;
+}
+
+.upload-title {
+  margin: 0 0 0.35rem;
+  font-weight: 600;
+}
+
+.upload-hint,
+.upload-meta {
+  margin: 0;
+  font-size: 0.85rem;
+  color: var(--muted);
+}
+
+.upload-meta {
+  margin-top: 0.75rem;
+  font-family: var(--mono);
+  font-size: 0.75rem;
+}
+
+.banner {
+  padding: 0.75rem 1rem;
+  border-radius: 8px;
+  margin-bottom: 1rem;
+  font-size: 0.9rem;
+}
+
+.banner--error {
+  background: rgba(255, 92, 92, 0.12);
+  border: 1px solid rgba(255, 92, 92, 0.35);
+  color: #ffb4b4;
+}
+
+.banner--success {
+  background: rgba(52, 199, 89, 0.12);
+  border: 1px solid rgba(52, 199, 89, 0.35);
+  color: #8ce99a;
+}
+
+.banner--info {
+  background: rgba(61, 156, 245, 0.12);
+  border: 1px solid rgba(61, 156, 245, 0.35);
+  color: #a5d8ff;
+}
+
+.toolbar {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  margin-bottom: 1rem;
+  flex-wrap: wrap;
+}
+
+.search {
+  flex: 1;
+  min-width: 200px;
+  padding: 0.65rem 1rem;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+  color: var(--text);
+  font-size: 0.95rem;
+}
+
+.search:focus {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+.count {
+  color: var(--muted);
+  font-size: 0.875rem;
+  white-space: nowrap;
+}
+
+.table-wrap {
+  overflow-x: auto;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+}
+
+.empty {
+  padding: 3rem;
+  text-align: center;
+  color: var(--muted);
+}
+
+.contacts-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.875rem;
+}
+
+.contacts-table th,
+.contacts-table td {
+  padding: 0.75rem 1rem;
+  text-align: left;
+  border-bottom: 1px solid var(--border);
+  vertical-align: middle;
+}
+
+.contacts-table th {
+  font-weight: 600;
+  color: var(--muted);
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  background: rgba(0, 0, 0, 0.2);
+  position: sticky;
+  top: 0;
+}
+
+.contacts-table tbody tr:hover {
+  background: var(--surface-hover);
+}
+
+.contacts-table .muted {
+  color: var(--muted);
+  font-size: 0.8rem;
+}
+
+.actions {
+  display: flex;
+  gap: 0.35rem;
+  white-space: nowrap;
+}
+
+.btn {
+  padding: 0.4rem 0.75rem;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg);
+  color: var(--text);
+  font-size: 0.8rem;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+
+.btn:hover {
+  background: var(--surface-hover);
+}
+
+.btn--primary {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+}
+
+.btn--primary:hover {
+  background: var(--accent-dim);
+}
+
+.btn--ghost {
+  border-color: transparent;
+  background: transparent;
+}
+
+.btn--danger {
+  color: var(--danger);
+  border-color: transparent;
+  background: transparent;
+}
+
+.btn--danger:hover {
+  background: rgba(255, 92, 92, 0.12);
+}
+
+.edit-row input {
+  width: 100%;
+  min-width: 80px;
+  padding: 0.35rem 0.5rem;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--bg);
+  color: var(--text);
+  font-size: 0.8rem;
+}
+
+.edit-actions {
+  display: flex;
+  gap: 0.5rem;
+}
+
+@media (max-width: 768px) {
+  .app {
+    padding: 1rem 1rem 3rem;
+  }
+
+  .contacts-table th:nth-child(6),
+  .contacts-table td:nth-child(6) {
+    display: none;
+  }
+}
