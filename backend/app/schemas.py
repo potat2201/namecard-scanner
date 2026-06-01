@@ -39,3 +39,4 @@ class ScanResult(BaseModel):
     raw_text: str
     extraction_method: str
     message: str
+    sync_warning: Optional[str] = None

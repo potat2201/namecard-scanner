@@ -8,3 +8,7 @@ pydantic==2.10.3
 pydantic-settings==2.6.1
 httpx==0.28.1
 python-dotenv==1.0.1
+google-api-python-client==2.159.0
+google-auth==2.37.0
+notion-client==2.3.0
+google-auth-oauthlib==1.2.1

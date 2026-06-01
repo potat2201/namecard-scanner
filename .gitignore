@@ -1,4 +1,8 @@
 .env
+google-drive-credentials.json
+**/google-drive-credentials.json
+google-oauth-client.json
+**/google-oauth-client.json
 __pycache__/
 *.py[cod]
 .venv/
@@ -6,5 +10,6 @@ venv/
 backend/data/
 node_modules/
 dist/
+*.tsbuildinfo
 .DS_Store
 *.log

@@ -119,16 +119,99 @@ Open **http://localhost:5173**
 
 Set `LAN_EXPOSE=true` in `.env` and add your Mac IP to `CORS_ORIGINS` if you use the split-terminal setup above.
 
+## Notion sync
+
+Contacts sync **two-way** with a Notion database. Local scans, edits, and deletes push to Notion; changes made in Notion are pulled every few minutes (or on demand).
+
+1. Create an integration at [notion.so/my-integrations](https://www.notion.so/my-integrations).
+2. Create a parent page in Notion and **share it with your integration**.
+3. Copy the page ID from the page URL (`https://www.notion.so/.../<page_id>`).
+4. Add to `.env`:
+
+   ```env
+   NOTION_TOKEN=secret_...
+   NOTION_PARENT_PAGE_ID=your_page_id
+   NOTION_SYNC_ENABLED=true
+   NOTION_SYNC_POLL_SECONDS=300
+   ```
+
+5. Restart the backend. On first run, a **Namecard Contacts** database is created under your parent page. Copy the logged `NOTION_DATABASE_ID` into `.env` to skip re-lookup on future starts.
+
+**Conflict resolution:** last-write-wins using `updated_at` (local) vs Notion `last_edited_time`.
+
+**Manual sync:**
+
+```bash
+curl http://localhost:8000/api/notion-status
+curl -X POST "http://localhost:8000/api/sync/notion?direction=both"
+```
+
+Name card **images** sync to Google Drive when configured; **text fields** sync to Notion.
+
+## Google Drive photo backup
+
+Every uploaded name card photo is copied to a Google Drive folder **before** OCR runs. If Drive upload fails (when configured), the scan is aborted.
+
+### Personal Gmail (recommended)
+
+Service accounts **cannot** upload to personal My Drive folders (Google storage quota restriction). Use OAuth instead:
+
+1. In [Google Cloud Console](https://console.cloud.google.com/), enable the **Google Drive API**.
+2. Configure the **OAuth consent screen**:
+   - User type: **External**
+   - Publishing status: **Testing** (stay in Testing — do not publish to Production)
+   - **Test users** → add your Gmail (e.g. `potat2201@gmail.com`)
+   - Scopes → add `.../auth/drive.file` only (not full `drive` — that requires Google verification)
+3. **Credentials → Create OAuth client ID → Desktop app** — download JSON as `backend/google-oauth-client.json`.
+4. Create a folder named **`namecard`** in your Google Drive (no sharing needed).
+5. Add to `.env`:
+
+   ```env
+   GOOGLE_DRIVE_OAUTH_CLIENT_PATH=backend/google-oauth-client.json
+   GOOGLE_DRIVE_FOLDER_NAME=namecard
+   GOOGLE_DRIVE_FOLDER_ID=your_folder_id_from_drive_url
+   ```
+
+6. Authorize once:
+
+   ```bash
+   cd backend && source .venv/bin/activate
+   pip install -r requirements.txt
+   python scripts/google_drive_auth.py
+   ```
+
+7. Restart the backend and upload a test name card.
+
+### Google Workspace (service account)
+
+Service accounts can upload to **Shared drives** only. For My Drive folders, use OAuth above.
+
+Leave all `GOOGLE_DRIVE_*` auth paths unset to skip Drive uploads (local-only mode).
+
+The Drive API is free for normal personal use; uploaded photos count against your Google Drive storage quota.
+
+### Port 5173 already in use?
+
+Another Vite app (or a stuck dev server) may be holding the port:
+
+```bash
+kill $(lsof -t -iTCP:5173 -sTCP:LISTEN)
+```
+
+Or set a different port in `.env`: `PORT=5174` (and add that origin to `CORS_ORIGINS` if calling the API directly).
+
 ## Usage
 
 1. Drag & drop or click to upload a name card photo.
-2. The app OCRs the image, parses fields, and saves a row to the database.
+2. OCR runs, the photo is uploaded to Google Drive named **`email@domain.com.jpg`**, then saved to SQLite and synced to Notion.
 3. View, search, edit, or delete contacts in the table.
 
 ## API
 
 | Method | Path | Description |
 |--------|------|-------------|
+| GET | `/api/notion-status` | Notion sync configuration and last sync time |
+| POST | `/api/sync/notion?direction=both\|push\|pull` | Run Notion sync manually |
 | GET | `/api/ocr-status` | Check Ollama / Tesseract availability |
 | GET | `/api/contacts` | List contacts (`?q=search`) |
 | POST | `/api/scan` | Upload image, extract & save |
@@ -154,6 +237,8 @@ namecard-scanner/
 ├── backend/
 │   ├── app/
 │   │   ├── main.py      # API routes
+│   │   ├── google_drive.py  # Drive photo backup on upload
+│   │   ├── notion_sync.py  # Notion two-way sync
 │   │   ├── ocr.py       # Ollama / OpenAI / Tesseract
 │   │   ├── parser.py    # Field extraction from text
 │   │   └── models.py    # Contact table

@@ -22,7 +22,17 @@ class Contact(Base):
     address: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     raw_text: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     image_path: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)
+    notion_page_id: Mapped[Optional[str]] = mapped_column(String(36), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         server_default=func.now(),
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        onupdate=func.now(),
+    )
+    notion_last_edited: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
     )

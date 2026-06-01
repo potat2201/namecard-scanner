@@ -25,6 +25,16 @@ class Settings(BaseSettings):
     ollama_timeout: float = 120.0
     lan_expose: bool = False
     cors_origins: str = "http://localhost:5173,http://localhost:3000"
+    google_drive_credentials_path: Optional[str] = None
+    google_drive_oauth_client_path: Optional[str] = None
+    google_drive_oauth_token_path: Optional[str] = None
+    google_drive_folder_name: str = "namecard"
+    google_drive_folder_id: Optional[str] = None
+    notion_token: Optional[str] = None
+    notion_parent_page_id: Optional[str] = None
+    notion_database_id: Optional[str] = None
+    notion_sync_enabled: bool = False
+    notion_sync_poll_seconds: int = 300
 
 
 settings = Settings()
