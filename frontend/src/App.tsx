@@ -16,6 +16,16 @@ function formatDate(iso: string) {
   });
 }
 
+function formatDuration(ms: number): string {
+  const totalSeconds = Math.max(0, Math.round(ms / 1000));
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds % 60;
+  if (minutes > 0) {
+    return `${minutes} min ${seconds} sec`;
+  }
+  return `${seconds} sec`;
+}
+
 function cell(value: string | null) {
   return value?.trim() || "—";
 }
@@ -71,6 +81,9 @@ export default function App() {
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
   const [lastMethod, setLastMethod] = useState<string | null>(null);
+  const [lastProcessDurationMs, setLastProcessDurationMs] = useState<
+    number | null
+  >(null);
   const [editingId, setEditingId] = useState<number | null>(null);
   const [editDraft, setEditDraft] = useState<Partial<Contact>>({});
   const cameraInputRef = useRef<HTMLInputElement>(null);
@@ -112,8 +125,14 @@ export default function App() {
     setError(null);
     setSuccess(null);
     setLastMethod(null);
+    setLastProcessDurationMs(null);
 
-    const results: { ok: boolean; message: string; name: string }[] = [];
+    const startedAt = Date.now();
+    const results: {
+      ok: boolean;
+      message: string;
+      name: string;
+    }[] = [];
 
     try {
       for (let i = 0; i < images.length; i++) {
@@ -126,11 +145,20 @@ export default function App() {
             setScanStatus(`${prefix}${msg}`),
           );
           setLastMethod(result.extraction_method);
-          results.push({ ok: true, message: result.message, name: file.name });
+          results.push({
+            ok: true,
+            message: result.message,
+            name: file.name,
+          });
         } catch (e) {
           const msg = e instanceof Error ? e.message : "Scan failed";
           results.push({ ok: false, message: msg, name: file.name });
         }
+      }
+
+      const okResults = results.filter((r) => r.ok);
+      if (okResults.length > 0) {
+        setLastProcessDurationMs(Date.now() - startedAt);
       }
 
       const { success, error } = summarizeBatch(results);
@@ -175,6 +203,8 @@ export default function App() {
       const result = await clearDatabase();
       setContacts([]);
       setEditingId(null);
+      setLastProcessDurationMs(null);
+      setLastMethod(null);
       const parts = [
         `Cleared ${result.deleted} local contact${result.deleted === 1 ? "" : "s"}.`,
       ];
@@ -297,8 +327,14 @@ export default function App() {
                 Upload photos
               </button>
             </div>
-            {lastMethod && (
-              <p className="upload-meta">Last scan: {lastMethod}</p>
+            {(lastProcessDurationMs != null || lastMethod) && (
+              <p className="upload-meta">
+                {lastProcessDurationMs != null && (
+                  <>Processed in {formatDuration(lastProcessDurationMs)}</>
+                )}
+                {lastProcessDurationMs != null && lastMethod && " · "}
+                {lastMethod && <>OCR: {lastMethod}</>}
+              </p>
             )}
           </>
         )}
@@ -307,13 +343,18 @@ export default function App() {
       {success && (
         <div
           className={`banner ${
-            success === "Contact Already Exists"
+            success.includes("already existed")
               ? "banner--info"
               : "banner--success"
           }`}
           role="status"
         >
-          {success}
+          <p className="banner-message">{success}</p>
+          {lastProcessDurationMs != null && (
+            <p className="banner-meta">
+              Completed in {formatDuration(lastProcessDurationMs)}
+            </p>
+          )}
         </div>
       )}
 

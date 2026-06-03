@@ -5,6 +5,7 @@ import json
 import logging
 import mimetypes
 from datetime import datetime, timezone
+from urllib.parse import urlparse
 from functools import lru_cache
 from pathlib import Path
 from typing import Any, Optional
@@ -22,7 +23,7 @@ logger = logging.getLogger(__name__)
 SCOPES = ("https://www.googleapis.com/auth/drive.file",)
 FOLDER_MIME = "application/vnd.google-apps.folder"
 DEFAULT_OAUTH_TOKEN_PATH = DATA_DIR / "google_drive_token.json"
-UNKNOWN_COMPANY_FOLDER = "Unknown Company"
+UNKNOWN_DOMAIN_FOLDER = "Unknown Domain"
 
 
 class GoogleDriveError(Exception):
@@ -168,13 +169,40 @@ def _escape_drive_query(value: str) -> str:
 def _sanitize_folder_name(name: str) -> str:
     cleaned = "".join(c if c.isalnum() or c in " -_&." else "_" for c in name.strip())
     cleaned = " ".join(cleaned.split())
-    return cleaned[:200] or UNKNOWN_COMPANY_FOLDER
+    return cleaned[:200] or UNKNOWN_DOMAIN_FOLDER
 
 
-def _company_folder_name(company: Optional[str]) -> str:
-    if company and company.strip():
-        return _sanitize_folder_name(company)
-    return UNKNOWN_COMPANY_FOLDER
+def _domain_from_email(email: Optional[str]) -> Optional[str]:
+    if not email or "@" not in email:
+        return None
+    domain = email.strip().lower().split("@", 1)[1].strip().rstrip(".")
+    return domain or None
+
+
+def _domain_from_website(website: Optional[str]) -> Optional[str]:
+    if not website or not website.strip():
+        return None
+    url = website.strip()
+    if not url.startswith(("http://", "https://")):
+        url = f"https://{url}"
+    host = urlparse(url).hostname
+    if not host:
+        return None
+    host = host.lower()
+    if host.startswith("www."):
+        host = host[4:]
+    return host or None
+
+
+def _domain_folder_name(
+    *,
+    email: Optional[str] = None,
+    website: Optional[str] = None,
+) -> str:
+    domain = _domain_from_email(email) or _domain_from_website(website)
+    if domain:
+        return _sanitize_folder_name(domain)
+    return UNKNOWN_DOMAIN_FOLDER
 
 
 def _find_child_folder(service: Any, parent_id: str, folder_name: str) -> Optional[str]:
@@ -207,8 +235,14 @@ def _find_child_folder(service: Any, parent_id: str, folder_name: str) -> Option
     return files[0]["id"]
 
 
-def _get_or_create_company_folder(service: Any, parent_id: str, company: Optional[str]) -> str:
-    folder_name = _company_folder_name(company)
+def _get_or_create_domain_folder(
+    service: Any,
+    parent_id: str,
+    *,
+    email: Optional[str] = None,
+    website: Optional[str] = None,
+) -> str:
+    folder_name = _domain_folder_name(email=email, website=website)
     existing_id = _find_child_folder(service, parent_id, folder_name)
     if existing_id:
         return existing_id
@@ -229,7 +263,7 @@ def _get_or_create_company_folder(service: Any, parent_id: str, company: Optiona
     folder_id = created.get("id")
     if not folder_id:
         raise GoogleDriveError(f"Failed to create Google Drive folder '{folder_name}'")
-    logger.info("Created Google Drive company folder '%s' (id=%s)", folder_name, folder_id)
+    logger.info("Created Google Drive domain folder '%s' (id=%s)", folder_name, folder_id)
     return folder_id
 
 
@@ -249,12 +283,14 @@ def _upload_namecard_copy_sync(
     local_path: Path,
     *,
     email: Optional[str] = None,
-    company: Optional[str] = None,
+    website: Optional[str] = None,
     original_filename: Optional[str] = None,
 ) -> str:
     service = _drive_service()
     root_folder_id = _resolve_folder_id()
-    folder_id = _get_or_create_company_folder(service, root_folder_id, company)
+    folder_id = _get_or_create_domain_folder(
+        service, root_folder_id, email=email, website=website
+    )
 
     if email:
         drive_name = _drive_name_from_email(email, local_path)
@@ -301,10 +337,10 @@ async def upload_namecard_copy(
     local_path: Path,
     *,
     email: Optional[str] = None,
-    company: Optional[str] = None,
+    website: Optional[str] = None,
     original_filename: Optional[str] = None,
 ) -> str:
-    """Upload a namecard image into a company subfolder under the configured Drive folder."""
+    """Upload a namecard image into a domain subfolder under the configured Drive folder."""
     if not is_drive_configured():
         raise GoogleDriveError("Google Drive is not configured")
 
@@ -312,6 +348,6 @@ async def upload_namecard_copy(
         _upload_namecard_copy_sync,
         local_path,
         email=email,
-        company=company,
+        website=website,
         original_filename=original_filename,
     )

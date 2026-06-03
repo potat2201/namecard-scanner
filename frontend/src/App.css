@@ -103,6 +103,16 @@
   font-size: 0.9rem;
 }
 
+.banner-message {
+  margin: 0;
+}
+
+.banner-meta {
+  margin: 0.35rem 0 0;
+  font-size: 0.8rem;
+  opacity: 0.9;
+}
+
 .banner--error {
   background: rgba(255, 92, 92, 0.12);
   border: 1px solid rgba(255, 92, 92, 0.35);

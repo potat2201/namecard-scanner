@@ -54,7 +54,7 @@ async def process_scan(
         await _emit(progress, "drive", "Backing up photo to Google Drive…")
         try:
             await upload_namecard_copy(
-                dest, email=parsed.email, company=parsed.company
+                dest, email=parsed.email, website=parsed.website
             )
         except GoogleDriveError as exc:
             dest.unlink(missing_ok=True)

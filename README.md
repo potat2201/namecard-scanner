@@ -150,7 +150,7 @@ Name card **images** sync to Google Drive when configured; **text fields** sync 
 
 ## Google Drive photo backup
 
-Every uploaded name card photo is copied to Google Drive **after OCR**. Photos are placed in a **company subfolder** under your `namecard` folder and named **`email@domain.com.jpg`**. If Drive upload fails (when configured), the scan is aborted.
+Every uploaded name card photo is copied to Google Drive **after OCR**. Photos are placed in a **domain subfolder** under your `namecard` folder (e.g. `acme.com/`) and named **`email@domain.com.jpg`**. If Drive upload fails (when configured), the scan is aborted.
 
 ### Personal Gmail (recommended)
 
@@ -203,7 +203,7 @@ Or set a different port in `.env`: `PORT=5174` (and add that origin to `CORS_ORI
 ## Usage
 
 1. Drag & drop or click to upload a name card photo.
-2. OCR runs, the photo is uploaded to Google Drive under **`namecard/<Company Name>/email@domain.com.jpg`**, then saved to SQLite and synced to Notion. Cards without a company go to **`Unknown Company/`**.
+2. OCR runs, the photo is uploaded to Google Drive under **`namecard/<domain>/email@domain.com.jpg`** (domain from email, or website if no email), then saved to SQLite and synced to Notion. Cards without a domain go to **`Unknown Domain/`**.
 3. View, search, edit, or delete contacts in the table.
 
 ## API
