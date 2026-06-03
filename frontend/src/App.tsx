@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
   Contact,
+  clearDatabase,
   deleteContact,
   fetchContacts,
   scanNamecard,
@@ -19,17 +20,66 @@ function cell(value: string | null) {
   return value?.trim() || "—";
 }
 
+function imageFiles(list: FileList | null | undefined): File[] {
+  if (!list) return [];
+  return Array.from(list).filter((f) => f.type.startsWith("image/"));
+}
+
+function summarizeBatch(
+  results: { ok: boolean; message: string; name: string }[],
+): { success: string | null; error: string | null } {
+  const ok = results.filter((r) => r.ok);
+  const failed = results.filter((r) => !r.ok);
+  if (results.length === 1) {
+    if (ok.length === 1) return { success: ok[0].message, error: null };
+    return { success: null, error: `${failed[0].name}: ${failed[0].message}` };
+  }
+
+  const created = ok.filter((r) => r.message === "Contact created").length;
+  const updated = ok.filter((r) => r.message === "Contact updated").length;
+  const exists = ok.filter((r) => r.message === "Contact Already Exists").length;
+  const parts: string[] = [];
+  if (created) parts.push(`${created} created`);
+  if (updated) parts.push(`${updated} updated`);
+  if (exists) parts.push(`${exists} already existed`);
+
+  let success: string | null = null;
+  if (ok.length) {
+    success = `Processed ${ok.length} of ${results.length} name cards` +
+      (parts.length ? ` (${parts.join(", ")})` : "");
+  }
+
+  let error: string | null = null;
+  if (failed.length) {
+    const detail = failed
+      .slice(0, 3)
+      .map((r) => r.name)
+      .join(", ");
+    const more = failed.length > 3 ? ` and ${failed.length - 3} more` : "";
+    error = `${failed.length} failed: ${detail}${more}`;
+  }
+
+  return { success, error };
+}
+
 export default function App() {
   const [contacts, setContacts] = useState<Contact[]>([]);
   const [search, setSearch] = useState("");
   const [loading, setLoading] = useState(true);
   const [scanning, setScanning] = useState(false);
+  const [scanStatus, setScanStatus] = useState("Saving photo…");
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
   const [lastMethod, setLastMethod] = useState<string | null>(null);
   const [editingId, setEditingId] = useState<number | null>(null);
   const [editDraft, setEditDraft] = useState<Partial<Contact>>({});
-  const fileRef = useRef<HTMLInputElement>(null);
+  const cameraInputRef = useRef<HTMLInputElement>(null);
+  const galleryInputRef = useRef<HTMLInputElement>(null);
+
+  function clearFileInputs() {
+    if (cameraInputRef.current) cameraInputRef.current.value = "";
+    if (galleryInputRef.current) galleryInputRef.current.value = "";
+  }
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -49,33 +99,98 @@ export default function App() {
     return () => clearTimeout(timer);
   }, [load]);
 
-  async function handleScan(file: File) {
+  async function handleScanFiles(files: File[]) {
+    const images = files.filter((f) => f.type.startsWith("image/"));
+    if (images.length === 0) return;
+
     setScanning(true);
+    setScanStatus(
+      images.length > 1
+        ? `Name card 1 of ${images.length}: Saving photo…`
+        : "Saving photo…",
+    );
     setError(null);
     setSuccess(null);
     setLastMethod(null);
+
+    const results: { ok: boolean; message: string; name: string }[] = [];
+
     try {
-      const result = await scanNamecard(file);
-      setLastMethod(result.extraction_method);
-      setSuccess(result.message);
+      for (let i = 0; i < images.length; i++) {
+        const file = images[i];
+        const prefix =
+          images.length > 1 ? `Name card ${i + 1} of ${images.length}: ` : "";
+
+        try {
+          const result = await scanNamecard(file, (msg) =>
+            setScanStatus(`${prefix}${msg}`),
+          );
+          setLastMethod(result.extraction_method);
+          results.push({ ok: true, message: result.message, name: file.name });
+        } catch (e) {
+          const msg = e instanceof Error ? e.message : "Scan failed";
+          results.push({ ok: false, message: msg, name: file.name });
+        }
+      }
+
+      const { success, error } = summarizeBatch(results);
+      setSuccess(success);
+      setError(error);
       await load();
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "Scan failed");
     } finally {
       setScanning(false);
-      if (fileRef.current) fileRef.current.value = "";
+      clearFileInputs();
     }
   }
 
-  function onFileChange(e: React.ChangeEvent<HTMLInputElement>) {
-    const file = e.target.files?.[0];
-    if (file) void handleScan(file);
+  function onCameraSelected(e: React.ChangeEvent<HTMLInputElement>) {
+    const files = imageFiles(e.target.files);
+    if (files.length) void handleScanFiles(files.slice(0, 1));
+  }
+
+  function onGallerySelected(e: React.ChangeEvent<HTMLInputElement>) {
+    const files = imageFiles(e.target.files);
+    if (files.length) void handleScanFiles(files);
   }
 
   function onDrop(e: React.DragEvent) {
     e.preventDefault();
-    const file = e.dataTransfer.files?.[0];
-    if (file?.type.startsWith("image/")) void handleScan(file);
+    const files = imageFiles(e.dataTransfer.files);
+    if (files.length) void handleScanFiles(files);
+  }
+
+  async function onClearDatabase() {
+    const confirmed = confirm(
+      "Delete ALL contacts from this app?\n\n" +
+        "• Local database and saved card photos on this server will be removed.\n" +
+        "• All rows in your Notion namecard database will be removed (the database stays for future use).\n" +
+        "• Google Drive is NOT changed — you need to manually clean up Google Drive namecards.\n\n" +
+        "This cannot be undone.",
+    );
+    if (!confirmed) return;
+
+    setError(null);
+    setSuccess(null);
+    try {
+      const result = await clearDatabase();
+      setContacts([]);
+      setEditingId(null);
+      const parts = [
+        `Cleared ${result.deleted} local contact${result.deleted === 1 ? "" : "s"}.`,
+      ];
+      if (result.notion_archived > 0) {
+        parts.push(
+          `Removed ${result.notion_archived} Notion record${result.notion_archived === 1 ? "" : "s"} (database kept).`,
+        );
+      }
+      if (result.notion_errors > 0) {
+        parts.push(`${result.notion_errors} Notion row(s) could not be removed.`);
+      }
+      parts.push("Remember to manually clean up Google Drive namecards if needed.");
+      setSuccess(parts.join(" "));
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Failed to clear database");
+    }
   }
 
   async function onDelete(id: number) {
@@ -129,26 +244,63 @@ export default function App() {
         className={`upload-zone ${scanning ? "upload-zone--busy" : ""}`}
         onDragOver={(e) => e.preventDefault()}
         onDrop={onDrop}
-        onClick={() => fileRef.current?.click()}
-        role="button"
-        tabIndex={0}
-        onKeyDown={(e) => e.key === "Enter" && fileRef.current?.click()}
+        aria-busy={scanning}
       >
         <input
-          ref={fileRef}
+          ref={cameraInputRef}
           type="file"
           accept="image/*"
           capture="environment"
           hidden
-          onChange={onFileChange}
+          disabled={scanning}
+          onChange={onCameraSelected}
         />
-        <div className="upload-icon">📇</div>
-        <p className="upload-title">
-          {scanning ? "Scanning card…" : "Drop a name card or click to upload"}
-        </p>
-        <p className="upload-hint">JPEG, PNG, HEIC — phone camera works too</p>
-        {lastMethod && (
-          <p className="upload-meta">Last scan: {lastMethod}</p>
+        <input
+          ref={galleryInputRef}
+          type="file"
+          accept="image/*"
+          multiple
+          hidden
+          disabled={scanning}
+          onChange={onGallerySelected}
+        />
+        {scanning ? (
+          <div className="upload-processing" role="status" aria-live="polite">
+            <div className="spinner" aria-hidden="true" />
+            <p className="upload-title">{scanStatus}</p>
+            <p className="upload-hint">
+              Each photo is one contact — this can take a while for multiple
+              cards; please keep this page open
+            </p>
+          </div>
+        ) : (
+          <>
+            <div className="upload-icon">📇</div>
+            <p className="upload-title">Scan a name card</p>
+            <p className="upload-hint">
+              JPEG, PNG, HEIC — upload multiple cards at once, or drop images
+              here on desktop
+            </p>
+            <div className="upload-actions">
+              <button
+                type="button"
+                className="btn btn--primary upload-btn"
+                onClick={() => cameraInputRef.current?.click()}
+              >
+                Take photo
+              </button>
+              <button
+                type="button"
+                className="btn upload-btn"
+                onClick={() => galleryInputRef.current?.click()}
+              >
+                Upload photos
+              </button>
+            </div>
+            {lastMethod && (
+              <p className="upload-meta">Last scan: {lastMethod}</p>
+            )}
+          </>
         )}
       </section>
 
@@ -178,10 +330,19 @@ export default function App() {
           placeholder="Search name, company, email, phone…"
           value={search}
           onChange={(e) => setSearch(e.target.value)}
+          disabled={scanning}
         />
         <span className="count">
           {loading ? "Loading…" : `${contacts.length} contact${contacts.length === 1 ? "" : "s"}`}
         </span>
+        <button
+          type="button"
+          className="btn btn--danger toolbar-clear"
+          onClick={() => void onClearDatabase()}
+          disabled={scanning || loading || contacts.length === 0}
+        >
+          Clear database
+        </button>
       </section>
 
       <section className="table-wrap">

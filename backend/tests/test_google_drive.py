@@ -38,6 +38,53 @@ def test_drive_name_from_email():
     assert google_drive._drive_name_from_email(None, path).endswith("-card.jpg")
 
 
+def test_company_folder_name():
+    assert google_drive._company_folder_name("Acme Corp.") == "Acme Corp."
+    assert google_drive._company_folder_name("  ") == google_drive.UNKNOWN_COMPANY_FOLDER
+    assert google_drive._company_folder_name(None) == google_drive.UNKNOWN_COMPANY_FOLDER
+
+
+def test_get_or_create_company_folder_reuses_existing(monkeypatch, tmp_path):
+    creds = tmp_path / "sa.json"
+    creds.write_text("{}")
+    monkeypatch.setattr(google_drive.settings, "google_drive_credentials_path", str(creds))
+
+    mock_service = MagicMock()
+    mock_service.files.return_value.list.return_value.execute.return_value = {
+        "files": [{"id": "company-folder-1", "name": "Acme Corp"}]
+    }
+
+    with patch.object(google_drive, "_drive_service", return_value=mock_service):
+        folder_id = google_drive._get_or_create_company_folder(
+            mock_service, "root-folder", "Acme Corp"
+        )
+
+    assert folder_id == "company-folder-1"
+    mock_service.files.return_value.create.assert_not_called()
+
+
+def test_get_or_create_company_folder_creates_when_missing(monkeypatch, tmp_path):
+    creds = tmp_path / "sa.json"
+    creds.write_text("{}")
+    monkeypatch.setattr(google_drive.settings, "google_drive_credentials_path", str(creds))
+
+    mock_service = MagicMock()
+    mock_service.files.return_value.list.return_value.execute.return_value = {"files": []}
+    mock_service.files.return_value.create.return_value.execute.return_value = {
+        "id": "new-company-folder"
+    }
+
+    with patch.object(google_drive, "_drive_service", return_value=mock_service):
+        folder_id = google_drive._get_or_create_company_folder(
+            mock_service, "root-folder", "New Co"
+        )
+
+    assert folder_id == "new-company-folder"
+    create_body = mock_service.files.return_value.create.call_args.kwargs["body"]
+    assert create_body["name"] == "New Co"
+    assert create_body["parents"] == ["root-folder"]
+
+
 def test_upload_uses_email_filename(monkeypatch, tmp_path: Path):
     image = tmp_path / "card.jpg"
     image.write_bytes(b"fake-image")
@@ -52,13 +99,19 @@ def test_upload_uses_email_filename(monkeypatch, tmp_path: Path):
     mock_create.return_value.execute.return_value = {"id": "drive-file-1"}
 
     with patch.object(google_drive, "_drive_service", return_value=mock_service):
-        file_id = google_drive._upload_namecard_copy_sync(
-            image, email="jane@acme.com"
-        )
+        with patch.object(
+            google_drive,
+            "_get_or_create_company_folder",
+            return_value="company-folder-99",
+        ) as mock_company_folder:
+            file_id = google_drive._upload_namecard_copy_sync(
+                image, email="jane@acme.com", company="Acme Corp"
+            )
 
+    mock_company_folder.assert_called_once()
     assert file_id == "drive-file-1"
     metadata = mock_create.call_args.kwargs["body"]
-    assert metadata["parents"] == ["folder-123"]
+    assert metadata["parents"] == ["company-folder-99"]
     assert metadata["name"] == "jane@acme.com.jpg"
 
 
@@ -77,14 +130,16 @@ def test_upload_uses_configured_folder_id(monkeypatch, tmp_path: Path):
     mock_create.return_value.execute.return_value = {"id": "drive-file-1"}
 
     with patch.object(google_drive, "_drive_service", return_value=mock_service):
-        file_id = google_drive._upload_namecard_copy_sync(
-            image, email="jane@acme.com"
-        )
+        with patch.object(
+            google_drive,
+            "_get_or_create_company_folder",
+            return_value="company-folder-99",
+        ):
+            file_id = google_drive._upload_namecard_copy_sync(
+                image, email="jane@acme.com", company="Acme Corp"
+            )
 
     assert file_id == "drive-file-1"
-    metadata = mock_create.call_args.kwargs["body"]
-    assert metadata["parents"] == ["folder-123"]
-    assert metadata["name"] == "jane@acme.com.jpg"
 
 
 def test_resolve_folder_id_by_name(monkeypatch, tmp_path):

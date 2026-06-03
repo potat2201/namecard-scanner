@@ -3,7 +3,7 @@ from __future__ import annotations
 import re
 from difflib import SequenceMatcher
 from pathlib import Path
-from typing import Optional
+from typing import Any, Optional
 
 from sqlalchemy import func
 from sqlalchemy.orm import Session
@@ -25,7 +25,29 @@ def normalize_email(email: Optional[str]) -> Optional[str]:
     return cleaned or None
 
 
-def normalize_phone(phone: Optional[str]) -> Optional[str]:
+def scalar_str(value: Any) -> Optional[str]:
+    """Coerce OCR/LLM values (lists, numbers) into a single string field."""
+    if value is None:
+        return None
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, list):
+        for item in value:
+            cleaned = scalar_str(item)
+            if cleaned:
+                return cleaned
+        return None
+    if isinstance(value, (int, float)):
+        if isinstance(value, float) and value.is_integer():
+            value = int(value)
+        text = str(value).strip()
+        return text or None
+    text = str(value).strip()
+    return text or None
+
+
+def normalize_phone(phone: Any) -> Optional[str]:
+    phone = scalar_str(phone)
     if phone is None:
         return None
     digits = re.sub(r"\D", "", phone)
@@ -122,13 +144,13 @@ def fields_unchanged(existing: Contact, parsed: ParsedContact) -> bool:
 def canonicalize_parsed(parsed: ParsedContact) -> ParsedContact:
     """Normalize identifiers before save / duplicate check."""
     return ParsedContact(
-        name=parsed.name,
-        company=parsed.company,
-        title=parsed.title,
-        phone=parsed.phone,
-        email=normalize_email(parsed.email),
-        website=parsed.website,
-        address=parsed.address,
+        name=scalar_str(parsed.name),
+        company=scalar_str(parsed.company),
+        title=scalar_str(parsed.title),
+        phone=scalar_str(parsed.phone),
+        email=normalize_email(scalar_str(parsed.email)),
+        website=scalar_str(parsed.website),
+        address=scalar_str(parsed.address),
     )
 
 
@@ -161,3 +183,24 @@ def replace_contact_image(contact: Contact, new_path: Path) -> None:
 def discard_uploaded_image(path: Path) -> None:
     if path.exists():
         path.unlink()
+
+
+def clear_local_database(db: Session) -> dict[str, int]:
+    """Remove all contacts and local card images. Does not touch Google Drive."""
+    contacts = db.query(Contact).all()
+    deleted = len(contacts)
+    files_removed = 0
+
+    seen_paths: set[Path] = set()
+    for contact in contacts:
+        if contact.image_path:
+            path = Path(contact.image_path)
+            if path not in seen_paths:
+                seen_paths.add(path)
+                if path.exists():
+                    path.unlink()
+                    files_removed += 1
+        db.delete(contact)
+
+    db.commit()
+    return {"deleted": deleted, "files_removed": files_removed}

@@ -22,6 +22,7 @@ logger = logging.getLogger(__name__)
 SCOPES = ("https://www.googleapis.com/auth/drive.file",)
 FOLDER_MIME = "application/vnd.google-apps.folder"
 DEFAULT_OAUTH_TOKEN_PATH = DATA_DIR / "google_drive_token.json"
+UNKNOWN_COMPANY_FOLDER = "Unknown Company"
 
 
 class GoogleDriveError(Exception):
@@ -160,6 +161,78 @@ def _resolve_folder_id() -> str:
     return files[0]["id"]
 
 
+def _escape_drive_query(value: str) -> str:
+    return value.replace("\\", "\\\\").replace("'", "\\'")
+
+
+def _sanitize_folder_name(name: str) -> str:
+    cleaned = "".join(c if c.isalnum() or c in " -_&." else "_" for c in name.strip())
+    cleaned = " ".join(cleaned.split())
+    return cleaned[:200] or UNKNOWN_COMPANY_FOLDER
+
+
+def _company_folder_name(company: Optional[str]) -> str:
+    if company and company.strip():
+        return _sanitize_folder_name(company)
+    return UNKNOWN_COMPANY_FOLDER
+
+
+def _find_child_folder(service: Any, parent_id: str, folder_name: str) -> Optional[str]:
+    escaped = _escape_drive_query(folder_name)
+    query = (
+        f"name = '{escaped}' and mimeType = '{FOLDER_MIME}' "
+        f"and '{parent_id}' in parents and trashed = false"
+    )
+    results = (
+        service.files()
+        .list(
+            q=query,
+            spaces="drive",
+            fields="files(id, name)",
+            pageSize=10,
+            includeItemsFromAllDrives=True,
+            supportsAllDrives=True,
+        )
+        .execute()
+    )
+    files = results.get("files", [])
+    if not files:
+        return None
+    if len(files) > 1:
+        logger.warning(
+            "Multiple Drive folders named '%s' under parent %s; using first match",
+            folder_name,
+            parent_id,
+        )
+    return files[0]["id"]
+
+
+def _get_or_create_company_folder(service: Any, parent_id: str, company: Optional[str]) -> str:
+    folder_name = _company_folder_name(company)
+    existing_id = _find_child_folder(service, parent_id, folder_name)
+    if existing_id:
+        return existing_id
+
+    created = (
+        service.files()
+        .create(
+            body={
+                "name": folder_name,
+                "mimeType": FOLDER_MIME,
+                "parents": [parent_id],
+            },
+            fields="id",
+            supportsAllDrives=True,
+        )
+        .execute()
+    )
+    folder_id = created.get("id")
+    if not folder_id:
+        raise GoogleDriveError(f"Failed to create Google Drive folder '{folder_name}'")
+    logger.info("Created Google Drive company folder '%s' (id=%s)", folder_name, folder_id)
+    return folder_id
+
+
 def _drive_name_from_email(email: Optional[str], local_path: Path) -> str:
     ext = local_path.suffix or ".jpg"
     if email:
@@ -176,10 +249,12 @@ def _upload_namecard_copy_sync(
     local_path: Path,
     *,
     email: Optional[str] = None,
+    company: Optional[str] = None,
     original_filename: Optional[str] = None,
 ) -> str:
     service = _drive_service()
-    folder_id = _resolve_folder_id()
+    root_folder_id = _resolve_folder_id()
+    folder_id = _get_or_create_company_folder(service, root_folder_id, company)
 
     if email:
         drive_name = _drive_name_from_email(email, local_path)
@@ -226,9 +301,10 @@ async def upload_namecard_copy(
     local_path: Path,
     *,
     email: Optional[str] = None,
+    company: Optional[str] = None,
     original_filename: Optional[str] = None,
 ) -> str:
-    """Upload a local namecard image to the configured Google Drive folder."""
+    """Upload a namecard image into a company subfolder under the configured Drive folder."""
     if not is_drive_configured():
         raise GoogleDriveError("Google Drive is not configured")
 
@@ -236,5 +312,6 @@ async def upload_namecard_copy(
         _upload_namecard_copy_sync,
         local_path,
         email=email,
+        company=company,
         original_filename=original_filename,
     )

@@ -152,14 +152,20 @@ def parse_contact_text(text: str) -> ParsedContact:
     )
 
 
+def _llm_field(data: dict, key: str) -> str | None:
+    from app.contacts_service import scalar_str
+
+    return scalar_str(data.get(key))
+
+
 def parse_llm_json(content: str) -> ParsedContact:
     data = json.loads(content)
     return ParsedContact(
-        name=data.get("name"),
-        company=data.get("company"),
-        title=data.get("title"),
-        phone=data.get("phone"),
-        email=data.get("email"),
-        website=data.get("website"),
-        address=data.get("address"),
+        name=_llm_field(data, "name"),
+        company=_llm_field(data, "company"),
+        title=_llm_field(data, "title"),
+        phone=_llm_field(data, "phone"),
+        email=_llm_field(data, "email"),
+        website=_llm_field(data, "website"),
+        address=_llm_field(data, "address"),
     )

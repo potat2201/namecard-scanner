@@ -10,23 +10,18 @@ from typing import Any, Literal, Optional
 import httpx
 from fastapi import Depends, FastAPI, File, HTTPException, Query, Response, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 
 from app.config import DATA_DIR, UPLOAD_DIR, settings
-from app.contacts_service import (
-    apply_scan_to_contact,
-    canonicalize_parsed,
-    discard_uploaded_image,
-    fields_unchanged,
-    find_existing_contact,
-    replace_contact_image,
-)
+from app.contacts_service import clear_local_database
 from app.database import SessionLocal, get_db, init_db
-from app.google_drive import GoogleDriveError, is_drive_configured, upload_namecard_copy
 from app.models import Contact
 from app.notion_sync import (
+    NotionSyncError,
     archive_contact_in_notion_safe,
     bootstrap_notion_sync,
+    clear_notion_database,
     get_sync_status,
     is_notion_configured,
     notion_poll_loop,
@@ -34,7 +29,7 @@ from app.notion_sync import (
     run_sync,
     touch_updated_at,
 )
-from app.ocr import scan_namecard
+from app.scan_flow import process_scan, stream_scan_events
 from app.schemas import ContactCreate, ContactRead, ContactUpdate, ScanResult
 
 logger = logging.getLogger(__name__)
@@ -198,11 +193,29 @@ def delete_contact(contact_id: int, db: Session = Depends(get_db)) -> Response:
     return Response(status_code=204)
 
 
-@app.post("/api/scan", response_model=ScanResult)
-async def scan_card(
-    file: UploadFile = File(...),
-    db: Session = Depends(get_db),
-) -> ScanResult:
+@app.delete("/api/contacts")
+def clear_contacts(db: Session = Depends(get_db)) -> dict[str, Any]:
+    """
+    Clear local contacts and the Notion database rows (if configured).
+
+    Google Drive is not modified.
+    """
+    notion_result = {"archived": 0, "errors": 0}
+    if is_notion_configured():
+        try:
+            notion_result = clear_notion_database()
+        except NotionSyncError as exc:
+            raise HTTPException(status_code=502, detail=str(exc)) from exc
+
+    local_result = clear_local_database(db)
+    return {
+        **local_result,
+        "notion_archived": notion_result["archived"],
+        "notion_errors": notion_result["errors"],
+    }
+
+
+def _save_upload(file: UploadFile) -> Path:
     if not file.content_type or not file.content_type.startswith("image/"):
         raise HTTPException(status_code=400, detail="File must be an image")
 
@@ -212,76 +225,25 @@ async def scan_card(
 
     with dest.open("wb") as buffer:
         shutil.copyfileobj(file.file, buffer)
+    return dest
 
-    try:
-        parsed, raw_text, method = await scan_namecard(dest)
-    except Exception as exc:
-        dest.unlink(missing_ok=True)
-        raise HTTPException(
-            status_code=422,
-            detail=f"Could not read name card: {exc}",
-        ) from exc
 
-    parsed = canonicalize_parsed(parsed)
+@app.post("/api/scan", response_model=ScanResult)
+async def scan_card(
+    file: UploadFile = File(...),
+    db: Session = Depends(get_db),
+) -> ScanResult:
+    dest = _save_upload(file)
+    return await process_scan(dest, db)
 
-    if is_drive_configured():
-        try:
-            await upload_namecard_copy(dest, email=parsed.email)
-        except GoogleDriveError as exc:
-            dest.unlink(missing_ok=True)
-            raise HTTPException(status_code=502, detail=str(exc)) from exc
 
-    message = "Contact created"
-    dest_str = str(dest)
-    sync_warning: Optional[str] = None
-
-    existing = find_existing_contact(db, parsed)
-    if existing:
-        if fields_unchanged(existing, parsed):
-            discard_uploaded_image(dest)
-            db.refresh(existing)
-            return ScanResult(
-                contact=ContactRead.model_validate(existing),
-                raw_text=raw_text,
-                extraction_method=method,
-                message="Contact Already Exists",
-            )
-
-        apply_scan_to_contact(existing, parsed, raw_text, dest_str)
-        replace_contact_image(existing, dest)
-        touch_updated_at(existing)
-        db.commit()
-        db.refresh(existing)
-        sync_warning = push_contact_safe(db, existing)
-        return ScanResult(
-            contact=ContactRead.model_validate(existing),
-            raw_text=raw_text,
-            extraction_method=method,
-            message="Contact updated",
-            sync_warning=sync_warning,
-        )
-
-    contact = Contact(
-        name=parsed.name,
-        company=parsed.company,
-        title=parsed.title,
-        phone=parsed.phone,
-        email=parsed.email,
-        website=parsed.website,
-        address=parsed.address,
-        raw_text=raw_text,
-        image_path=dest_str,
-    )
-    touch_updated_at(contact)
-    db.add(contact)
-    db.commit()
-    db.refresh(contact)
-    sync_warning = push_contact_safe(db, contact)
-
-    return ScanResult(
-        contact=ContactRead.model_validate(contact),
-        raw_text=raw_text,
-        extraction_method=method,
-        message=message,
-        sync_warning=sync_warning,
+@app.post("/api/scan/stream")
+async def scan_card_stream(
+    file: UploadFile = File(...),
+    db: Session = Depends(get_db),
+) -> StreamingResponse:
+    dest = _save_upload(file)
+    return StreamingResponse(
+        stream_scan_events(dest, db),
+        media_type="application/x-ndjson",
     )

@@ -133,7 +133,7 @@ def test_pull_archived_page_deletes_local_contact(monkeypatch):
     }
 
     mock_client = MagicMock()
-    mock_client.databases.query.return_value = {
+    mock_client.request.return_value = {
         "results": [page],
         "has_more": False,
     }
@@ -143,3 +143,27 @@ def test_pull_archived_page_deletes_local_contact(monkeypatch):
 
     assert result["deleted"] == 1
     db.delete.assert_called_once_with(contact)
+
+
+def test_clear_notion_database_archives_active_pages(monkeypatch):
+    monkeypatch.setattr(notion_sync.settings, "notion_token", "secret")
+    monkeypatch.setattr(notion_sync.settings, "notion_parent_page_id", "parent-1")
+    monkeypatch.setattr(notion_sync.settings, "notion_database_id", "db-1")
+
+    mock_client = MagicMock()
+    mock_client.request.return_value = {
+        "results": [
+            {"id": "page-a", "archived": False},
+            {"id": "page-b", "archived": True},
+        ],
+        "has_more": False,
+    }
+
+    with patch.object(notion_sync, "_get_client", return_value=mock_client):
+        result = notion_sync.clear_notion_database()
+
+    assert result == {"archived": 1, "errors": 0}
+    mock_client.pages.update.assert_called_once_with(
+        page_id="page-a",
+        archived=True,
+    )

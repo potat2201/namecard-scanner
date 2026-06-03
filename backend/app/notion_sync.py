@@ -116,6 +116,24 @@ def _get_client() -> Client:
     return Client(auth=settings.notion_token, notion_version=NOTION_API_VERSION)
 
 
+def _query_database(
+    client: Client,
+    database_id: str,
+    *,
+    start_cursor: Optional[str] = None,
+    page_size: int = 100,
+) -> dict[str, Any]:
+    """Query database pages (notion-sdk 2.x removed Client.databases.query)."""
+    body: dict[str, Any] = {"page_size": page_size}
+    if start_cursor:
+        body["start_cursor"] = start_cursor
+    return client.request(
+        path=f"databases/{database_id}/query",
+        method="POST",
+        body=body,
+    )
+
+
 def _find_child_database(client: Client, parent_page_id: str) -> Optional[str]:
     cursor: Optional[str] = None
     while True:
@@ -380,6 +398,59 @@ def archive_contact_in_notion_safe(contact: Contact) -> Optional[str]:
         return str(exc)
 
 
+def clear_notion_database() -> dict[str, int]:
+    """
+    Archive every row in the Namecard Notion database.
+
+    The database and its property schema are kept for future scans.
+    """
+    if not is_notion_configured():
+        return {"archived": 0, "errors": 0}
+
+    client = _get_client()
+    database_id = _resolve_database_id(client)
+
+    archived = 0
+    errors = 0
+    cursor: Optional[str] = None
+
+    while True:
+        try:
+            response = _query_database(
+                client,
+                database_id,
+                start_cursor=cursor,
+                page_size=100,
+            )
+        except APIResponseError as exc:
+            raise NotionSyncError(str(exc)) from exc
+
+        for page in response.get("results", []):
+            if page.get("archived"):
+                continue
+            page_id = page.get("id")
+            if not page_id:
+                continue
+            try:
+                client.pages.update(page_id=page_id, archived=True)
+                archived += 1
+            except APIResponseError as exc:
+                logger.warning("Failed to archive Notion page %s: %s", page_id, exc)
+                errors += 1
+
+        if not response.get("has_more"):
+            break
+        cursor = response.get("next_cursor")
+
+    state = _load_state()
+    state.pop("last_pull_at", None)
+    state.pop("last_push_at", None)
+    state.pop("last_error", None)
+    _save_state(state)
+
+    return {"archived": archived, "errors": errors}
+
+
 def push_all_contacts(db: Session) -> dict[str, int]:
     if not is_notion_configured():
         return {"pushed": 0, "errors": 0}
@@ -410,8 +481,9 @@ def pull_from_notion(db: Session) -> dict[str, int]:
 
     while True:
         try:
-            response = client.databases.query(
-                database_id=database_id,
+            response = _query_database(
+                client,
+                database_id,
                 start_cursor=cursor,
                 page_size=100,
             )
